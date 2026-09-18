@@ -19,8 +19,7 @@ struct pipe {
   int writeopen;  // write fd is still open
 };
 
-int
-pipealloc(struct file **f0, struct file **f1)
+int pipealloc(struct file **f0, struct file **f1)
 {
   struct pipe *pi;
 
@@ -55,8 +54,7 @@ pipealloc(struct file **f0, struct file **f1)
   return -1;
 }
 
-void
-pipeclose(struct pipe *pi, int writable)
+void pipeclose(struct pipe *pi, int writable)
 {
   acquire(&pi->lock);
   if(writable){
@@ -73,8 +71,7 @@ pipeclose(struct pipe *pi, int writable)
     release(&pi->lock);
 }
 
-int
-pipewrite(struct pipe *pi, uint64 addr, int n)
+int pipewrite(struct pipe *pi, uint64 addr, int n)
 {
   int i;
   char ch;
@@ -99,8 +96,7 @@ pipewrite(struct pipe *pi, uint64 addr, int n)
   return i;
 }
 
-int
-piperead(struct pipe *pi, uint64 addr, int n)
+int piperead(struct pipe *pi, uint64 addr, int n)
 {
   int i;
   struct proc *pr = myproc();

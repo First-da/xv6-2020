@@ -104,8 +104,8 @@ sys_close(void)
   return 0;
 }
 
-uint64
-sys_fstat(void)
+//success: 0   fail: 1
+uint64 sys_fstat(void)
 {
   struct file *f;
   uint64 st; // user pointer to struct stat
@@ -454,8 +454,7 @@ sys_exec(void)
   return -1;
 }
 
-uint64
-sys_pipe(void)
+uint64 sys_pipe(void)
 {
   uint64 fdarray; // user pointer to array of two integers
   struct file *rf, *wf;
