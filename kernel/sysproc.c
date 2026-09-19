@@ -6,9 +6,9 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "sysinfo.h"
 
-uint64
-sys_exit(void)
+uint64 sys_exit(void)
 {
   int n;
   if(argint(0, &n) < 0)
@@ -17,20 +17,17 @@ sys_exit(void)
   return 0;  // not reached
 }
 
-uint64
-sys_getpid(void)
+uint64 sys_getpid(void)
 {
   return myproc()->pid;
 }
 
-uint64
-sys_fork(void)
+uint64 sys_fork(void)
 {
   return fork();
 }
 
-uint64
-sys_wait(void)
+uint64 sys_wait(void)
 {
   uint64 p;
   if(argaddr(0, &p) < 0)
@@ -38,8 +35,7 @@ sys_wait(void)
   return wait(p);
 }
 
-uint64
-sys_sbrk(void)
+uint64 sys_sbrk(void)
 {
   int addr;
   int n;
@@ -52,8 +48,7 @@ sys_sbrk(void)
   return addr;
 }
 
-uint64
-sys_sleep(void)
+uint64 sys_sleep(void)
 {
   int n;
   uint ticks0;
@@ -73,8 +68,7 @@ sys_sleep(void)
   return 0;
 }
 
-uint64
-sys_kill(void)
+uint64 sys_kill(void)
 {
   int pid;
 
@@ -85,8 +79,7 @@ sys_kill(void)
 
 // return how many clock tick interrupts have occurred
 // since start.
-uint64
-sys_uptime(void)
+uint64 sys_uptime(void)
 {
   uint xticks;
 
@@ -94,4 +87,33 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64 sys_trace(void)
+{
+  int mask;
+
+  if (argint(0, &mask) < 0) {
+    return -1;
+  }
+
+  myproc()->trace_mask = mask;
+  return 0;
+}
+
+uint64 sys_sysinfo(void)
+{
+  uint64 addr_u;
+  struct sysinfo struct_k;
+  //fetch pointer form user mode
+  if (argaddr(0, &addr_u) < 0) {
+    return -1;
+  }
+  struct_k.nproc = sysinfo_npro();
+  struct_k.freemem = sysinfo_fmem();
+  if (copyout(myproc()->pagetable, addr_u, (char *)&struct_k, sizeof(struct_k)) < 0) {
+    return -1;
+  }
+
+  return 0;
 }

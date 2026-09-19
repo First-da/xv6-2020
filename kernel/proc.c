@@ -255,8 +255,7 @@ growproc(int n)
 
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
-int
-fork(void)
+int fork(void)
 {
   int i, pid;
   struct proc *np;
@@ -282,6 +281,9 @@ fork(void)
 
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
+
+  //copy trace_mask number from parent process to child process
+  np->trace_mask = p->trace_mask;
 
   // increment reference counts on open file descriptors.
   for(i = 0; i < NOFILE; i++)
@@ -692,4 +694,18 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+uint64 sysinfo_npro(void)
+{
+    struct proc *p;
+    uint64 num = 0;
+    for (p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if(p->state != UNUSED) {
+          num++;
+      }
+      release(&p->lock);
+    }
+    return num;
 }
