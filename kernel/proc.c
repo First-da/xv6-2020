@@ -22,8 +22,7 @@ static void freeproc(struct proc *p);
 extern char trampoline[]; // trampoline.S
 
 // initialize the proc table at boot time.
-void
-procinit(void)
+void procinit(void)
 {
   struct proc *p;
   
@@ -47,8 +46,7 @@ procinit(void)
 // Must be called with interrupts disabled,
 // to prevent race with process being moved
 // to a different CPU.
-int
-cpuid()
+int cpuid()
 {
   int id = r_tp();
   return id;
@@ -56,16 +54,14 @@ cpuid()
 
 // Return this CPU's cpu struct.
 // Interrupts must be disabled.
-struct cpu*
-mycpu(void) {
+struct cpu *mycpu(void) {
   int id = cpuid();
   struct cpu *c = &cpus[id];
   return c;
 }
 
 // Return the current struct proc *, or zero if none.
-struct proc*
-myproc(void) {
+struct proc *myproc(void) {
   push_off();
   struct cpu *c = mycpu();
   struct proc *p = c->proc;
@@ -73,8 +69,7 @@ myproc(void) {
   return p;
 }
 
-int
-allocpid() {
+int allocpid() {
   int pid;
   
   acquire(&pid_lock);
@@ -89,8 +84,7 @@ allocpid() {
 // If found, initialize state required to run in the kernel,
 // and return with p->lock held.
 // If there are no free procs, or a memory allocation fails, return 0.
-static struct proc*
-allocproc(void)
+static struct proc *allocproc(void)
 {
   struct proc *p;
 
@@ -106,6 +100,8 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
+  p->p_kernel_pagetable = kvminit_part2();
+  mappages(p->p_kernel_pagetable, p->kstack, PGSIZE, (uint64)kvmpa(p->kstack), PTE_R | PTE_W);
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -130,11 +126,23 @@ found:
   return p;
 }
 
+void free_walk_part2(pagetable_t pagetable)
+{
+  for (int i = 0; i < 512; i++) {
+    if ((pagetable[i] & PTE_V) && (pagetable[i] & (PTE_U | PTE_R | PTE_W | PTE_X))) {
+      pagetable[i] = 0;
+    } else if (pagetable[i] & PTE_V) {
+      free_walk_part2((pagetable_t)PTE2PA(pagetable[i]));
+      pagetable[i] = 0;
+    }
+  }
+  kfree((void*)pagetable);
+}
+
 // free a proc structure and the data hanging from it,
 // including user pages.
 // p->lock must be held.
-static void
-freeproc(struct proc *p)
+static void freeproc(struct proc *p)
 {
   if(p->trapframe)
     kfree((void*)p->trapframe);
@@ -150,12 +158,16 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  //free p_kernel_pagetable
+  free_walk_part2(p->p_kernel_pagetable);
+  p->p_kernel_pagetable = 0;
 }
+
 
 // Create a user page table for a given process,
 // with no user memory, but with trampoline pages.
-pagetable_t
-proc_pagetable(struct proc *p)
+pagetable_t proc_pagetable(struct proc *p)
 {
   pagetable_t pagetable;
 
@@ -187,8 +199,7 @@ proc_pagetable(struct proc *p)
 
 // Free a process's page table, and free the
 // physical memory it refers to.
-void
-proc_freepagetable(pagetable_t pagetable, uint64 sz)
+void proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
@@ -208,10 +219,10 @@ uchar initcode[] = {
 };
 
 // Set up first user process.
-void
-userinit(void)
+void userinit(void)
 {
   struct proc *p;
+  uint64 pa;
 
   p = allocproc();
   initproc = p;
@@ -230,18 +241,29 @@ userinit(void)
 
   p->state = RUNNABLE;
 
+  pa = walkaddr(p->pagetable, 0);
+  mappages(p->p_kernel_pagetable, 0, p->sz, pa, PTE_W|PTE_R|PTE_X);
+
   release(&p->lock);
 }
 
 // Grow or shrink user memory by n bytes.
 // Return 0 on success, -1 on failure.
-int
-growproc(int n)
+int growproc(int n)
 {
   uint sz;
   struct proc *p = myproc();
 
   sz = p->sz;
+
+  if (n > 0 && p->sz + n > PLIC) {
+    return -1;
+  }
+
+  if (p->sz > PLIC) {
+    return -1;
+  }
+
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
@@ -249,14 +271,25 @@ growproc(int n)
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
+  if (n > 0) {
+
+    if (sz != p->sz)
+      uvm2kvm(p->pagetable, p->p_kernel_pagetable, 0 + p->sz, n);
+  } else {
+
+    if (sz != p->sz) {
+      uvmunmap(p->p_kernel_pagetable, PGROUNDUP(p->sz + n), (PGROUNDUP(p->sz) - PGROUNDUP(p->sz + n)) / PGSIZE, 0);
+    }
+
+  }
   p->sz = sz;
+
   return 0;
 }
 
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
-int
-fork(void)
+int fork(void)
 {
   int i, pid;
   struct proc *np;
@@ -293,8 +326,12 @@ fork(void)
 
   pid = np->pid;
 
+  if(uvm2kvm(np->pagetable, np->p_kernel_pagetable, 0, np->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
   np->state = RUNNABLE;
-
   release(&np->lock);
 
   return pid;
@@ -453,8 +490,7 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
-void
-scheduler(void)
+void scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
@@ -473,8 +509,14 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        
+
+        w_satp(MAKE_SATP(p->p_kernel_pagetable));
+        sfence_vma();
+        
         swtch(&c->context, &p->context);
 
+        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
