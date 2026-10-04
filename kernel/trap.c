@@ -16,14 +16,13 @@ void kernelvec();
 
 extern int devintr();
 
-void
-trapinit(void)
+void trapinit(void)
 {
   initlock(&tickslock, "time");
 }
 
 // set up to take exceptions and traps while in the kernel.
-void
+void 
 trapinithart(void)
 {
   w_stvec((uint64)kernelvec);
@@ -33,8 +32,7 @@ trapinithart(void)
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
 //
-void
-usertrap(void)
+void usertrap(void)
 {
   int which_dev = 0;
 
@@ -77,8 +75,18 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2) {
+    if (p->n && !p->flag_running) {
+      p->tick++;
+      if (p->tick == p->n) {
+        p->tick = 0;
+        p->flag_running = 1;
+        memmove(&p->alarm, p->trapframe, sizeof(p->alarm));
+        p->trapframe->epc = p->handle;
+      }
+    }
     yield();
+  }
 
   usertrapret();
 }
@@ -86,8 +94,7 @@ usertrap(void)
 //
 // return to user space
 //
-void
-usertrapret(void)
+void usertrapret(void)
 {
   struct proc *p = myproc();
 
@@ -173,13 +180,11 @@ clockintr()
 // returns 2 if timer interrupt,
 // 1 if other device,
 // 0 if not recognized.
-int
-devintr()
+int devintr()
 {
   uint64 scause = r_scause();
 
-  if((scause & 0x8000000000000000L) &&
-     (scause & 0xff) == 9){
+  if((scause & 0x8000000000000000L) && (scause & 0xff) == 9){
     // this is a supervisor external interrupt, via PLIC.
 
     // irq indicates which device interrupted.
