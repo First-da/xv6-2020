@@ -67,7 +67,36 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if (r_scause() == 13 || r_scause() == 15) {
+    uint64 va = r_stval();
+    uint64 *pa;
+    pte_t *pte;
+    if (va < p->sz) {
+      va = PGROUNDDOWN(r_stval());
+      pte = walk(p->pagetable, va, 0);
+      if (pte != 0 && (*pte & PTE_V)) {
+        if (((*pte & PTE_U) == 0)) {
+          p->killed = 1;
+        }
+      }
+      else {
+        pa = (uint64*)kalloc();
+        if (pa == 0) {
+          p->killed = 1;
+          exit(-1);
+        }
+        memset(pa, 0, PGSIZE);
+        if (mappages(p->pagetable, va, PGSIZE, (uint64)pa, PTE_R | PTE_W | PTE_U | PTE_V) != 0) {
+          kfree(pa);
+          p->killed = 1;
+        }
+      }
+    } else {
+      // printf("invalid va\n");
+      p->killed = 1;
+    }
+  } 
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
