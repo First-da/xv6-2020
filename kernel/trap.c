@@ -67,7 +67,55 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if (r_scause() == 15) {
+    // store page fault
+    uint64 va = PGROUNDDOWN(r_stval());
+    uint64 pa_new;
+    pte_t *pte;
+    uint64 flags, pa;
+
+    if (va >= p->sz) {
+      p->killed = 1;          
+      exit(-1);
+    }
+
+    pte = walk(p->pagetable, va, 0);
+    if (pte == 0 || ((*pte & PTE_V) == 0)) {
+      // lackness of pte
+      p->killed = 1;          
+      exit(-1);
+    } 
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+
+    if (((flags & PTE_W) == 0) && (flags & PTE_COW)) {
+
+      if (reference_get(pa) == 1) {
+          //COW
+          flags &= ~PTE_COW;
+          flags |= PTE_W;
+          *pte = PA2PTE(pa) | flags;      //enable PTE_W;disable PTE_COW
+      } else {
+          pa_new = (uint64)kalloc();
+          if (pa_new == 0) {
+            // no free pages
+            p->killed = 1;
+            exit(-1);
+          }
+          memmove((void *)pa_new, (void *)pa, PGSIZE);
+
+          //COW
+          flags &= ~PTE_COW;
+          flags |= PTE_W;
+          *pte = PA2PTE(pa_new) | flags;      //enable PTE_W;disable PTE_COW
+          // reference_dec((uint64)pa);
+          kfree((void *)pa);
+      }
+    } else {
+      p->killed = 1;
+    }
+  } 
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
