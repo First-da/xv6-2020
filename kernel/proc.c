@@ -498,6 +498,13 @@ scheduler(void)
 // be proc->intena and proc->noff, but that would
 // break in the few places where a lock is held but
 // there's no process.
+// 切换到调度器。此时必须只持有 p->lock，
+// 并且已经修改了 proc->state。
+// 需要保存和恢复 intena，因为 intena 是当前内核线程的属性，
+// 而不是当前 CPU 的属性。
+// 按理说，intena 和 noff 应该属于 proc，
+// 即保存为 proc->intena 和 proc->noff，
+// 但这样会在少数持有锁却没有关联进程的情况下出现问题。
 void
 sched(void)
 {

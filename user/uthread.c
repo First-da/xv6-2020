@@ -10,19 +10,42 @@
 #define STACK_SIZE  8192
 #define MAX_THREAD  4
 
+struct context{
+  uint64 ra;
+  uint64 sp;
+
+  // callee-saved
+  uint64 s0;
+  uint64 s1;
+  uint64 s2;
+  uint64 s3;
+  uint64 s4;
+  uint64 s5;
+  uint64 s6;
+  uint64 s7;
+  uint64 s8;
+  uint64 s9;
+  uint64 s10;
+  uint64 s11;
+};
 
 struct thread {
   char       stack[STACK_SIZE]; /* the thread's stack */
   int        state;             /* FREE, RUNNING, RUNNABLE */
-
+  struct context context;            /* save thread context */
 };
 struct thread all_thread[MAX_THREAD];
 struct thread *current_thread;
 extern void thread_switch(uint64, uint64);
               
-void 
-thread_init(void)
+void  thread_init(void)
 {
+  // main() 是线程 0，它将第一次调用 thread_schedule()。
+  // 它需要一个栈，以便第一次调用 thread_switch() 时
+  // 能够保存线程 0 的状态。
+  // thread_schedule() 此后不会再运行主线程，
+  // 因为主线程的状态被设置为 RUNNING，
+  // 而 thread_schedule() 只会选择 RUNNABLE 状态的线程。
   // main() is thread 0, which will make the first invocation to
   // thread_schedule().  it needs a stack so that the first thread_switch() can
   // save thread 0's state.  thread_schedule() won't run the main thread ever
@@ -61,8 +84,10 @@ thread_schedule(void)
     current_thread = next_thread;
     /* YOUR CODE HERE
      * Invoke thread_switch to switch from t to next_thread:
+     * 调用 thread_switch，将执行流从线程 t 切换到线程 next_thread。
      * thread_switch(??, ??);
      */
+    thread_switch((uint64)&t->context, (uint64)&current_thread->context);
   } else
     next_thread = 0;
 }
@@ -77,6 +102,8 @@ thread_create(void (*func)())
   }
   t->state = RUNNABLE;
   // YOUR CODE HERE
+  t->context.ra = (uint64)func;
+  t->context.sp = (uint64)(t->stack + STACK_SIZE);
 }
 
 void 
