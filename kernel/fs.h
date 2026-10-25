@@ -1,13 +1,11 @@
 // On-disk file system format.
 // Both the kernel and user programs use this header file.
 
-
 #define ROOTINO  1   // root i-number
 #define BSIZE 1024  // block size
 
 // Disk layout:
-// [ boot block | super block | log | inode blocks |
-//                                          free bit map | data blocks]
+// [ boot block | super block | log | inode blocks | free bit map | data blocks]
 //
 // mkfs computes the super block and builds an initial file system. The
 // super block describes the disk layout:
@@ -24,31 +22,32 @@ struct superblock {
 
 #define FSMAGIC 0x10203040
 
-#define NDIRECT 12
-#define NINDIRECT (BSIZE / sizeof(uint))
-#define MAXFILE (NDIRECT + NINDIRECT)
+#define NDIRECT (12 - 1)
+#define NINDIRECT (BSIZE / sizeof(uint))                  // 256
+#define NINDIRECT_2 (BSIZE / sizeof(uint))                  // 256
+#define MAXFILE (NDIRECT + NINDIRECT + NINDIRECT_2 * NINDIRECT_2) // 12 + 256 + 65536 = 65803
 
 // On-disk inode structure
 struct dinode {
-  short type;           // File type
-  short major;          // Major device number (T_DEVICE only)
-  short minor;          // Minor device number (T_DEVICE only)
-  short nlink;          // Number of links to inode in file system
-  uint size;            // Size of file (bytes)
-  uint addrs[NDIRECT+1];   // Data block addresses
+  short type;               // File type
+  short major;              // Major device number (T_DEVICE only)
+  short minor;              // Minor device number (T_DEVICE only)
+  short nlink;              // Number of links to inode in file system
+  uint size;                // Size of file (bytes)
+  uint addrs[NDIRECT+ 1 + 1];    // Data block addresses
 };
 
 // Inodes per block.
-#define IPB           (BSIZE / sizeof(struct dinode))
+#define IPB           (BSIZE / sizeof(struct dinode))         //1024/64 = 16
 
 // Block containing inode i
-#define IBLOCK(i, sb)     ((i) / IPB + sb.inodestart)
+#define IBLOCK(i, sb)     ((i) / IPB + sb.inodestart)         //inode所属的磁盘块编号
 
 // Bitmap bits per block
-#define BPB           (BSIZE*8)
+#define BPB           (BSIZE*8)                               //1024 * 8 = 8192
 
 // Block of free map containing bit for block b
-#define BBLOCK(b, sb) ((b)/BPB + sb.bmapstart)
+#define BBLOCK(b, sb) ((b)/BPB + sb.bmapstart)                //bitmap的磁盘块编号
 
 // Directory is a file containing a sequence of dirent structures.
 #define DIRSIZ 14

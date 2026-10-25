@@ -19,15 +19,15 @@ struct {
   struct file file[NFILE];
 } ftable;
 
-void
-fileinit(void)
+//初始化ftable的锁
+void fileinit(void)
 {
   initlock(&ftable.lock, "ftable");
 }
 
 // Allocate a file structure.
-struct file*
-filealloc(void)
+// 遍历ftable中的file结构体，找到第一个空闲的file，设置引用数为1，并返回file指针。
+struct file* filealloc(void)
 {
   struct file *f;
 
@@ -44,8 +44,8 @@ filealloc(void)
 }
 
 // Increment ref count for file f.
-struct file*
-filedup(struct file *f)
+// 增加file->ref引用计数(ftable锁保护)
+struct file* filedup(struct file *f)
 {
   acquire(&ftable.lock);
   if(f->ref < 1)
@@ -56,8 +56,8 @@ filedup(struct file *f)
 }
 
 // Close file f.  (Decrement ref count, close when reaches 0.)
-void
-fileclose(struct file *f)
+// 减小file的引用计数。如果为0,那么关闭文件(修改file的类型、涉及到日志的修改以及inode的释放，所以通过事务执行)
+void fileclose(struct file *f)
 {
   struct file ff;
 
@@ -84,8 +84,8 @@ fileclose(struct file *f)
 
 // Get metadata about file f.
 // addr is a user virtual address, pointing to a struct stat.
-int
-filestat(struct file *f, uint64 addr)
+//将file的状态经过内核空间，拷贝到addr用户地址
+int filestat(struct file *f, uint64 addr)
 {
   struct proc *p = myproc();
   struct stat st;
@@ -103,8 +103,8 @@ filestat(struct file *f, uint64 addr)
 
 // Read from file f.
 // addr is a user virtual address.
-int
-fileread(struct file *f, uint64 addr, int n)
+// 从file的inode中读取数据(file->off提供偏移量)，拷贝n个字节到addr用户地址
+int fileread(struct file *f, uint64 addr, int n)
 {
   int r = 0;
 
@@ -131,8 +131,8 @@ fileread(struct file *f, uint64 addr, int n)
 
 // Write to file f.
 // addr is a user virtual address.
-int
-filewrite(struct file *f, uint64 addr, int n)
+//从f->inode的f->off处写入n个字节到用户态addr
+int filewrite(struct file *f, uint64 addr, int n)
 {
   int r, ret = 0;
 
@@ -152,6 +152,11 @@ filewrite(struct file *f, uint64 addr, int n)
     // and 2 blocks of slop for non-aligned writes.
     // this really belongs lower down, since writei()
     // might be writing a device like the console.
+    // 每次只写入少量磁盘块，以避免超过日志事务的最大容量。
+    // 计算时需要考虑 inode、间接索引块、磁盘块分配所涉及的块，
+    // 以及为非对齐写入额外预留的 2 个磁盘块。
+    // 这部分逻辑实际上更适合放在更底层实现，
+    // 因为 writei() 也可能向控制台这样的设备写入数据。
     int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
     int i = 0;
     while(i < n){

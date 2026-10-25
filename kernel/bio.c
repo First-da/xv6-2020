@@ -33,8 +33,7 @@ struct {
   struct buf head;
 } bcache;
 
-void
-binit(void)
+void binit(void)
 {
   struct buf *b;
 
@@ -55,8 +54,8 @@ binit(void)
 // Look through buffer cache for block on device dev.
 // If not found, allocate a buffer.
 // In either case, return locked buffer.
-static struct buf*
-bget(uint dev, uint blockno)
+//根据dev + blockno从bcache中获取对应的buf，如果buf中不存在，获取一个空的buf，方便后续从disk中获取到buf中
+static struct buf* bget(uint dev, uint blockno)
 {
   struct buf *b;
 
@@ -89,8 +88,8 @@ bget(uint dev, uint blockno)
 }
 
 // Return a locked buf with the contents of the indicated block.
-struct buf*
-bread(uint dev, uint blockno)
+//从bcache中获取相应的buf(从dev磁盘中读取指定的磁盘块blockno),返回buf
+struct buf* bread(uint dev, uint blockno)
 {
   struct buf *b;
 
@@ -103,8 +102,8 @@ bread(uint dev, uint blockno)
 }
 
 // Write b's contents to disk.  Must be locked.
-void
-bwrite(struct buf *b)
+//将bcache中指定的buf写入disk
+void bwrite(struct buf *b)
 {
   if(!holdingsleep(&b->lock))
     panic("bwrite");
@@ -113,8 +112,8 @@ bwrite(struct buf *b)
 
 // Release a locked buffer.
 // Move to the head of the most-recently-used list.
-void
-brelse(struct buf *b)
+//释放buf的睡眠锁并减小refcnt，如果为0，移至链表头部
+void brelse(struct buf *b)
 {
   if(!holdingsleep(&b->lock))
     panic("brelse");
@@ -136,15 +135,15 @@ brelse(struct buf *b)
   release(&bcache.lock);
 }
 
-void
-bpin(struct buf *b) {
+//增加buf的refcnt
+void bpin(struct buf *b) {
   acquire(&bcache.lock);
   b->refcnt++;
   release(&bcache.lock);
 }
 
-void
-bunpin(struct buf *b) {
+//减小buf的refcnt
+void bunpin(struct buf *b) {
   acquire(&bcache.lock);
   b->refcnt--;
   release(&bcache.lock);

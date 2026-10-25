@@ -16,10 +16,12 @@
 #include "file.h"
 #include "fcntl.h"
 
+// 获取第 n 个机器字长大小的系统调用参数，将其作为文件描述符，并返回该文件描述符
+// 以及与之对应的 struct file。
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
-static int
-argfd(int n, int *pfd, struct file **pf)
+// 以第n个参数寄存器的值为索引，从ofile取出文件描述符fd和对应的file结构体
+static int argfd(int n, int *pfd, struct file **pf)
 {
   int fd;
   struct file *f;
@@ -37,8 +39,8 @@ argfd(int n, int *pfd, struct file **pf)
 
 // Allocate a file descriptor for the given file.
 // Takes over file reference from caller on success.
-static int
-fdalloc(struct file *f)
+// 将ftable中的file结构体，添加进ofile空闲的位置，返回文件描述符
+static int fdalloc(struct file *f)
 {
   int fd;
   struct proc *p = myproc();
@@ -52,8 +54,8 @@ fdalloc(struct file *f)
   return -1;
 }
 
-uint64
-sys_dup(void)
+//从ofile取出参数0寄存器的索引位置的file，添加到ftable中新的空闲位置(多个文件描述符指向同一个file结构体)
+uint64 sys_dup(void)
 {
   struct file *f;
   int fd;
@@ -66,8 +68,8 @@ sys_dup(void)
   return fd;
 }
 
-uint64
-sys_read(void)
+//同fileread(从file的inode中读取数据(file->off提供偏移量)，拷贝n个字节到addr用户地址)，参数从寄存器中获取
+uint64 sys_read(void)
 {
   struct file *f;
   int n;
@@ -78,8 +80,8 @@ sys_read(void)
   return fileread(f, p, n);
 }
 
-uint64
-sys_write(void)
+//同filewrite(从f->inode的f->off处写入n个字节到用户态addr)，参数从寄存器中获取
+uint64 sys_write(void)
 {
   struct file *f;
   int n;
@@ -91,8 +93,8 @@ sys_write(void)
   return filewrite(f, p, n);
 }
 
-uint64
-sys_close(void)
+// 关闭系统调用的文件，从proc->ofile中清空指针，关闭ftable中的file
+uint64 sys_close(void)
 {
   int fd;
   struct file *f;
@@ -104,8 +106,8 @@ sys_close(void)
   return 0;
 }
 
-uint64
-sys_fstat(void)
+//同filestat(将file中的用户状态拷贝到st结构体地址)
+uint64 sys_fstat(void)
 {
   struct file *f;
   uint64 st; // user pointer to struct stat
@@ -116,8 +118,7 @@ sys_fstat(void)
 }
 
 // Create the path new as a link to the same inode as old.
-uint64
-sys_link(void)
+uint64 sys_link(void)
 {
   char name[DIRSIZ], new[MAXPATH], old[MAXPATH];
   struct inode *dp, *ip;
@@ -181,8 +182,7 @@ isdirempty(struct inode *dp)
   return 1;
 }
 
-uint64
-sys_unlink(void)
+uint64 sys_unlink(void)
 {
   struct inode *ip, *dp;
   struct dirent de;
@@ -238,8 +238,7 @@ bad:
   return -1;
 }
 
-static struct inode*
-create(char *path, short type, short major, short minor)
+static struct inode* create(char *path, short type, short major, short minor)
 {
   struct inode *ip, *dp;
   char name[DIRSIZ];
@@ -283,14 +282,15 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
-uint64
-sys_open(void)
+uint64 sys_open(void)
 {
   char path[MAXPATH];
   int fd, omode;
   struct file *f;
   struct inode *ip;
   int n;
+
+  int thresh_cnt = 0;
 
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
     return -1;
@@ -309,11 +309,48 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
-    if(ip->type == T_DIR && omode != O_RDONLY){
+    // if(ip->type == T_DIR && omode != O_RDONLY){
+    //   iunlockput(ip);
+    //   end_op();
+    //   return -1;
+    // }
+  }
+
+  while(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+
+    thresh_cnt++;
+
+    if (thresh_cnt > 10) {
       iunlockput(ip);
       end_op();
       return -1;
     }
+
+    //1.从inode里面读出来path
+    if ((n = readi(ip, 0, (uint64)path, 0, MAXPATH)) <= 0) {
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+    path[n] = '\0';
+
+    iunlockput(ip);
+
+    //2.找到path对应的inode
+    if ((ip = namei(path)) == 0) {
+      //path不存在
+      end_op();
+      return -1;
+    }
+
+    ilock(ip);
+
+  }
+
+  if(ip->type == T_DIR && omode != O_RDONLY){
+    iunlockput(ip);
+    end_op();
+    return -1;
   }
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
@@ -482,5 +519,34 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+
+uint64 sys_symlink(void){
+  char target[MAXPATH];
+  char path[MAXPATH];
+
+  struct inode *dp;
+
+  if ((argstr(0, target, MAXPATH) < 0) || (argstr(1, path, MAXPATH) < 0)){
+    return -1;
+  }
+  
+  begin_op();
+  if ((dp = create(path, T_SYMLINK, 0, 0)) == 0) {
+    //创建失败
+    end_op();
+    return -1;
+  }
+
+  if (writei(dp, 0, (uint64)target, 0, strlen(target)) != strlen(target)) {
+    iunlockput(dp);
+    end_op();
+    return -1;
+  }
+
+  iunlockput(dp);
+  end_op();
   return 0;
 }
