@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
+#include "fs.h"
+#include "sleeplock.h"
+#include "file.h"
 
 struct cpu cpus[NCPU];
 
@@ -262,8 +266,7 @@ growproc(int n)
 
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
-int
-fork(void)
+int fork(void)
 {
   int i, pid;
   struct proc *np;
@@ -300,6 +303,12 @@ fork(void)
 
   pid = np->pid;
 
+  for (int i = 0; i < 16; i++) {
+    memmove(&np->vtable[i], &p->vtable[i], sizeof(np->vtable[i]));
+    if (p->vtable[i].valid)
+      filedup(p->vtable[i].fp);
+  }
+
   np->state = RUNNABLE;
 
   release(&np->lock);
@@ -333,11 +342,58 @@ reparent(struct proc *p)
   }
 }
 
+int release_vma(struct proc *p, struct vma *vma)
+{ 
+  if (vma->valid == 0) {
+    return 0;
+  }
+  uint64 n_pages, pa, page_len;
+  pte_t* pte;
+  int n;
+
+  n_pages = PGROUNDUP(vma->length)/ PGSIZE;
+  if (vma->flags == MAP_SHARED) {
+    int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
+    
+    for (int i = 0; i < n_pages; i++) {
+          pte = walk(p->pagetable, vma->v_addr + i * PGSIZE, 0);
+          if (pte != 0 && ((*pte) & PTE_V)) {
+            pa = PTE2PA(*pte);
+            int ii = 0;
+            page_len = vma->length - i * PGSIZE > PGSIZE ? PGSIZE : vma->length - i * PGSIZE;
+            while(ii < page_len){ 
+              int n1 = page_len - ii;
+              if(n1 > max)
+                n1 = max;
+              begin_op();
+              ilock(vma->fp->ip);
+              n = writei(vma->fp->ip, 0, pa + ii, vma->offset + ii + i * PGSIZE, n1);
+              
+              iunlock(vma->fp->ip);
+              end_op();
+
+              if (n1 != n)
+                break;
+
+              ii += n;
+            }
+          }
+        }
+  }
+  uvmunmap(p->pagetable, vma->v_addr, n_pages, 1);
+  fileclose(vma->fp);
+  vma->valid = 0;
+  vma->length = 0;
+  vma->prot = 0;
+  vma->flags = 0;
+  vma->fp = 0;
+  return 0;
+}
+
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
-void
-exit(int status)
+void exit(int status)
 {
   struct proc *p = myproc();
 
@@ -352,6 +408,13 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
+  //===============================================================================
+  //释放vtable
+  for (int i = 0; i < 16; i++) {
+    release_vma(p, &p->vtable[i]);
+  }
+
+  //===============================================================================
 
   begin_op();
   iput(p->cwd);

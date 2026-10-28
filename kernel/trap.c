@@ -5,7 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+#include "fcntl.h"
 struct spinlock tickslock;
 uint ticks;
 
@@ -33,8 +36,7 @@ trapinithart(void)
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
 //
-void
-usertrap(void)
+void usertrap(void)
 {
   int which_dev = 0;
 
@@ -67,7 +69,74 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if (r_scause() == 13 || r_scause() == 15) {
+    uint64 addr = r_stval();
+    struct file *fp;
+    pte_t *pte;
+    uint64 pa;
+    int n;
+    int find = 0;
+    if (addr >= TRAPFRAME) {
+      p->killed = 1;
+    }
+
+    for (int i = 0; i < 16; i++){
+      if (p->vtable[i].valid && p->vtable[i].v_addr <= addr && p->vtable[i].v_addr + p->vtable[i].length > addr) {
+        if ((r_scause() == 15 && !(p->vtable[i].prot & PROT_WRITE)) ||
+          (r_scause() == 13 && !(p->vtable[i].prot & (PROT_READ | PROT_WRITE)))) {
+            p->killed = 1;
+            break;
+        }
+        pa = (uint64)kalloc();
+        if (pa == 0) {
+          p->killed = 1;
+          break;
+        }
+        memset((void *)pa, 0, PGSIZE);
+
+        fp = p->vtable[i].fp;
+        if (fp == 0 || fp->type != FD_INODE) {
+          kfree((void *)pa);
+          p->killed = 1;
+          break;
+        }
+        if (p->vtable[i].v_addr >= MAXVA) {
+          kfree((void *)pa);
+          p->killed = 1;
+          break;
+        }
+
+        uint64 page_addr = PGROUNDDOWN(addr);
+        pte = walk(p->pagetable, page_addr, 1);
+        if (pte == 0 || (*pte & PTE_V)) {
+          kfree((void *)pa);
+          p->killed = 1;
+          break;
+        }
+
+          
+        ilock(fp->ip);
+        if ((n = readi(fp->ip, 0, pa, p->vtable[i].offset + page_addr - p->vtable[i].v_addr, PGSIZE)) < 0 ) {
+            kfree((void *)pa);
+            iunlock(fp->ip);
+            p->killed = 1;
+            break;
+        }
+        // p->vtable[i].offset += n;
+        iunlock(fp->ip);
+        find = 1;
+        *pte = PA2PTE(pa) | PTE_U | PTE_V;
+        *pte = (p->vtable[i].prot & PROT_READ) ? *pte | PTE_R : *pte;
+        *pte = (p->vtable[i].prot & PROT_WRITE) ? *pte | PTE_W | PTE_R: *pte;
+
+        break;
+      }
+    }
+    if (find == 0) {
+      p->killed = 1;
+    }
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

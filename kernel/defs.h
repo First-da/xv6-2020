@@ -8,6 +8,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct vma;
 
 // bio.c
 void            binit(void);
@@ -141,6 +142,8 @@ int             fetchaddr(uint64, uint64*);
 void            syscall();
 
 // trap.c
+extern pte_t *  walk(pagetable_t, uint64, int);
+
 extern uint     ticks;
 void            trapinit(void);
 void            trapinithart(void);

@@ -15,7 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
-
+#include "memlayout.h"
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
@@ -91,8 +91,7 @@ sys_write(void)
   return filewrite(f, p, n);
 }
 
-uint64
-sys_close(void)
+uint64 sys_close(void)
 {
   int fd;
   struct file *f;
@@ -104,8 +103,7 @@ sys_close(void)
   return 0;
 }
 
-uint64
-sys_fstat(void)
+uint64 sys_fstat(void)
 {
   struct file *f;
   uint64 st; // user pointer to struct stat
@@ -483,4 +481,145 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64 sys_mmap(void)
+{
+  uint64 addr;
+  int length;
+  int prot;
+  int flags;
+  int fd;
+  int off;
+  struct proc *p;
+  struct vma *v = 0, *n = 0;
+  uint64 min_addr = TRAPFRAME - PGSIZE;
+  
+  if (argaddr(0, &addr) < 0 || argint(1, &length) < 0 || argint(2, &prot) < 0) {
+    return -1;
+  }
+  if (argint(3, &flags) < 0 || argint(4, &fd) < 0 || argint(5, &off) < 0) {
+    return -1;
+  }
+
+  p = myproc();
+  for (n = p->vtable; n < p->vtable + 16; n++){
+    if (n->valid == 0) {
+      v = n;
+    } else if (n->v_addr < min_addr){
+      min_addr = n->v_addr;
+    } 
+  }
+
+  if (v == 0)
+    return -1;
+
+  if (min_addr <= PGROUNDUP(p->sz) || PGROUNDUP(length) >= min_addr - PGROUNDUP(p->sz))
+    return -1;
+
+  if (fd < 0 || fd > NOFILE - 1 || p->ofile[fd] == 0) {
+    return -1;
+  }
+
+  if ((prot & PROT_WRITE) && flags == MAP_SHARED && !p->ofile[fd]->writable)
+    return -1;
+
+  v->v_addr = min_addr - PGROUNDUP(length);
+  v->length = length;
+  v->prot = prot;
+  v->flags = flags;
+  v->valid = 1;
+  v->offset = 0;
+  v->fp = p->ofile[fd];
+  filedup(p->ofile[fd]);
+
+  return v->v_addr;
+}
+
+uint64 sys_munmap(void)
+{   
+  uint64 addr;
+  int length;
+  struct proc *p = myproc();
+  struct vma *v;
+  uint64 va_page;
+  uint64 n_pages;
+  uint64 pa;
+  int do_free = 0;          //1:free all ； 2: begin； 3: end
+  pte_t *pte;
+  int n;
+  uint64 page_len;
+
+  if (argaddr(0, &addr) < 0 || argint(1, &length) < 0)
+    return -1;
+  
+  for (v = p->vtable; v < p->vtable + 16; v++){
+
+    if (v->valid && v->v_addr <= addr && v->v_addr + PGROUNDUP(v->length) > addr){
+      //共享模式下写回到文件
+      va_page = PGROUNDDOWN(addr);
+
+      if (PGROUNDUP(length) >= v->length) {
+        do_free = 1;
+      } else if (va_page == v->v_addr){
+        do_free = 2;
+      } else {
+        do_free = 3;
+      }
+      length = (length > v->length) ? v->length : length;
+      n_pages = PGROUNDUP(length)/ PGSIZE;
+
+      if (v->flags == MAP_SHARED) {
+        int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
+
+        for (int i = 0; i < n_pages; i++) {
+          pte = walk(p->pagetable, va_page + i * PGSIZE, 0);
+          if (pte != 0 && ((*pte) & PTE_V)) {
+            pa = PTE2PA(*pte);
+            int ii = 0;
+            page_len = v->v_addr + v->length - va_page - i * PGSIZE > PGSIZE ? PGSIZE : v->v_addr + v->length - va_page - i * PGSIZE;
+            while(ii < page_len){ 
+              int n1 = page_len - ii;
+              if(n1 > max)
+                n1 = max;
+
+              begin_op();
+              ilock(v->fp->ip);
+              n = writei(v->fp->ip, 0, pa + ii, v->offset + addr - v->v_addr + ii + i * PGSIZE, n1);
+              
+              iunlock(v->fp->ip);
+              end_op();
+
+              if (n1 != n)
+                return -1;
+
+              ii += n;
+            }
+          }
+        }
+      }
+
+      //解映射对应的内存页
+      uvmunmap(p->pagetable, va_page, n_pages, 1);
+
+      //减少file引用 + //修改vma状态
+      if (do_free == 1) {
+        fileclose(v->fp);
+        v->valid = 0;
+        v->length = 0;
+        v->prot = 0;
+        v->flags = 0;
+        v->fp = 0;
+      } else if (do_free == 2){
+        v->length -= PGROUNDUP(length);
+        v->v_addr += PGROUNDUP(length);
+        v->offset += PGROUNDUP(length);
+      } else {
+        v->length = addr - v->v_addr;
+      }
+      return 0;
+    }
+  }
+
+  return -1;
 }
