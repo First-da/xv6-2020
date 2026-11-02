@@ -11,8 +11,7 @@
 #include "proc.h"
 #include "defs.h"
 
-void
-pci_init()
+void pci_init()
 {
   // we'll place the e1000 registers at this address.
   // vm.c maps this range.

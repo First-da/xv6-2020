@@ -17,8 +17,7 @@ static uint8 broadcast_mac[ETHADDR_LEN] = { 0xFF, 0XFF, 0XFF, 0XFF, 0XFF, 0XFF }
 
 // Strips data from the start of the buffer and returns a pointer to it.
 // Returns 0 if less than the full requested length is available.
-char *
-mbufpull(struct mbuf *m, unsigned int len)
+char *mbufpull(struct mbuf *m, unsigned int len)
 {
   char *tmp = m->head;
   if (m->len < len)
@@ -29,8 +28,7 @@ mbufpull(struct mbuf *m, unsigned int len)
 }
 
 // Prepends data to the beginning of the buffer and returns a pointer to it.
-char *
-mbufpush(struct mbuf *m, unsigned int len)
+char * mbufpush(struct mbuf *m, unsigned int len)
 {
   m->head -= len;
   if (m->head < m->buf)
@@ -40,8 +38,7 @@ mbufpush(struct mbuf *m, unsigned int len)
 }
 
 // Appends data to the end of the buffer and returns a pointer to it.
-char *
-mbufput(struct mbuf *m, unsigned int len)
+char * mbufput(struct mbuf *m, unsigned int len)
 {
   char *tmp = m->head + m->len;
   m->len += len;
@@ -52,8 +49,7 @@ mbufput(struct mbuf *m, unsigned int len)
 
 // Strips data from the end of the buffer and returns a pointer to it.
 // Returns 0 if less than the full requested length is available.
-char *
-mbuftrim(struct mbuf *m, unsigned int len)
+char * mbuftrim(struct mbuf *m, unsigned int len)
 {
   if (len > m->len)
     return 0;
@@ -62,8 +58,7 @@ mbuftrim(struct mbuf *m, unsigned int len)
 }
 
 // Allocates a packet buffer.
-struct mbuf *
-mbufalloc(unsigned int headroom)
+struct mbuf *mbufalloc(unsigned int headroom)
 {
   struct mbuf *m;
  
@@ -80,15 +75,13 @@ mbufalloc(unsigned int headroom)
 }
 
 // Frees a packet buffer.
-void
-mbuffree(struct mbuf *m)
+void mbuffree(struct mbuf *m)
 {
   kfree(m);
 }
 
 // Pushes an mbuf to the end of the queue.
-void
-mbufq_pushtail(struct mbufq *q, struct mbuf *m)
+void mbufq_pushtail(struct mbufq *q, struct mbuf *m)
 {
   m->next = 0;
   if (!q->head){
@@ -100,8 +93,7 @@ mbufq_pushtail(struct mbufq *q, struct mbuf *m)
 }
 
 // Pops an mbuf from the start of the queue.
-struct mbuf *
-mbufq_pophead(struct mbufq *q)
+struct mbuf *mbufq_pophead(struct mbufq *q)
 {
   struct mbuf *head = q->head;
   if (!head)
@@ -118,16 +110,13 @@ mbufq_empty(struct mbufq *q)
 }
 
 // Intializes a queue of mbufs.
-void
-mbufq_init(struct mbufq *q)
+void mbufq_init(struct mbufq *q)
 {
   q->head = 0;
 }
 
-// This code is lifted from FreeBSD's ping.c, and is copyright by the Regents
-// of the University of California.
-static unsigned short
-in_cksum(const unsigned char *addr, int len)
+// This code is lifted from FreeBSD's ping.c, and is copyright by the Regents of the University of California.
+static unsigned short in_cksum(const unsigned char *addr, int len)
 {
   int nleft = len;
   const unsigned short *w = (const unsigned short *)addr;
@@ -160,8 +149,7 @@ in_cksum(const unsigned char *addr, int len)
 }
 
 // sends an ethernet packet
-static void
-net_tx_eth(struct mbuf *m, uint16 ethtype)
+static void net_tx_eth(struct mbuf *m, uint16 ethtype)
 {
   struct eth *ethhdr;
 
@@ -178,8 +166,7 @@ net_tx_eth(struct mbuf *m, uint16 ethtype)
 }
 
 // sends an IP packet
-static void
-net_tx_ip(struct mbuf *m, uint8 proto, uint32 dip)
+static void net_tx_ip(struct mbuf *m, uint8 proto, uint32 dip)
 {
   struct ip *iphdr;
 
@@ -199,9 +186,7 @@ net_tx_ip(struct mbuf *m, uint8 proto, uint32 dip)
 }
 
 // sends a UDP packet
-void
-net_tx_udp(struct mbuf *m, uint32 dip,
-           uint16 sport, uint16 dport)
+void net_tx_udp(struct mbuf *m, uint32 dip, uint16 sport, uint16 dport)
 {
   struct udp *udphdr;
 
@@ -217,8 +202,7 @@ net_tx_udp(struct mbuf *m, uint32 dip,
 }
 
 // sends an ARP packet
-static int
-net_tx_arp(uint16 op, uint8 dmac[ETHADDR_LEN], uint32 dip)
+static int net_tx_arp(uint16 op, uint8 dmac[ETHADDR_LEN], uint32 dip)
 {
   struct mbuf *m;
   struct arp *arphdr;
@@ -247,8 +231,7 @@ net_tx_arp(uint16 op, uint8 dmac[ETHADDR_LEN], uint32 dip)
 }
 
 // receives an ARP packet
-static void
-net_rx_arp(struct mbuf *m)
+static void net_rx_arp(struct mbuf *m)
 {
   struct arp *arphdr;
   uint8 smac[ETHADDR_LEN];
@@ -282,8 +265,7 @@ done:
 }
 
 // receives a UDP packet
-static void
-net_rx_udp(struct mbuf *m, uint16 len, struct ip *iphdr)
+static void net_rx_udp(struct mbuf *m, uint16 len, struct ip *iphdr)
 {
   struct udp *udphdr;
   uint32 sip;
@@ -317,8 +299,7 @@ fail:
 }
 
 // receives an IP packet
-static void
-net_rx_ip(struct mbuf *m)
+static void net_rx_ip(struct mbuf *m)
 {
   struct ip *iphdr;
   uint16 len;

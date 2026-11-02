@@ -1,3 +1,16 @@
+static inline void
+w_pmpcfg0(uint64 x)
+{
+  asm volatile("csrw pmpcfg0, %0" : : "r" (x));
+}
+
+static inline void
+w_pmpaddr0(uint64 x)
+{
+  asm volatile("csrw pmpaddr0, %0" : : "r" (x));
+}
+
+
 // which hart (core) is this?
 static inline uint64
 r_mhartid()
@@ -6,6 +19,7 @@ r_mhartid()
   asm volatile("csrr %0, mhartid" : "=r" (x) );
   return x;
 }
+//pmp
 
 // Machine Status Register, mstatus
 

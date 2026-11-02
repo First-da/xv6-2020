@@ -107,6 +107,7 @@ struct tx_desc
   uint8 css;
   uint16 special;
 };
+// 8 + 2 + 1 + 1 + 1 + 1 + 2 = 16Byte
 
 /* Receive Descriptor bit definitions [E1000 3.2.3.1] */
 #define E1000_RXD_STAT_DD       0x01    /* Descriptor Done */
@@ -122,4 +123,5 @@ struct rx_desc
   uint8 errors;      /* Descriptor Errors */
   uint16 special;
 };
+// 8 + 2 + 1 + 1 + 1 + 1 + 2 = 16Byte
 
